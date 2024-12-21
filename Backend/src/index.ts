@@ -34,8 +34,18 @@ export interface IUser extends Document {
   password: string;
   token?: string;
 }
+interface ISharedLink extends Document {
+  owner: string;
+  accessType: "all" | "single";
+  content?: string;
+}
+export interface ExtendedRequest extends Request {
+  user?: IUser;
+  sharedLink?: Document;
+  content?: Document;
+}
 
-// *** Utils -->
+// *** Utils --------->
 class ApiResponseHandler {
   public code: number;
   public message: string;
@@ -66,7 +76,7 @@ class ApiErrorHandler {
   }
 }
 
-// *** DB connnection -->
+// *** DB connnection ------>
 const connectDB = async () => {
   try {
     const db = await mongoose.connect(process.env.MONGO_URI as string);
@@ -82,7 +92,7 @@ connectDB().then(() => {
   });
 });
 
-// *** Models and Schemas -->
+// *** Models and Schemas -------->
 const userSchema = new Schema<IUser>(
   {
     email: { type: String, required: true, unique: true },
@@ -92,9 +102,7 @@ const userSchema = new Schema<IUser>(
   { timestamps: true }
 );
 const User = model<IUser>("User", userSchema);
-// *** --------------------------------------------------------
- // ** Link Schema will be here later...
-// *** ---------------------------------------------------------
+// *** ----------------------------------------
 const tagSchema = new Schema(
   {
     name: { type: String, unique: true },
@@ -115,9 +123,21 @@ const contentSchema = new Schema(
   { timestamps: true }
 );
 const Content = model("Content", contentSchema);
+// *** -----------------------------------------
+const linkSchema = new Schema(
+  {
+    owner: { type: mongoose.Types.ObjectId, ref: "User", required: true },
+    isActive: { type: Boolean, default: false },
+    accessType: { type: String, enum: ["single", "all"], default: "all" },
+    content: { type: mongoose.Types.ObjectId, ref: "Content" },
+    sharedLink: { type: String, unique: true, required: true },
+  },
+  { timestamps: true }
+);
+const Link = model("Link", linkSchema);
 
 // *** -----------------------------------------
-// *** Zod validation -->
+// *** Zod validation ---------->
 const Auth = z.object({
   email: z.string().email(),
   password: z.string().min(6, { message: "at least 6 characters" }),
@@ -129,7 +149,7 @@ const ContentValid = z.object({
   tags: z.array(z.string()).optional(),
 });
 
-// *** Middleware -->
+// *** Middlewares ------------>
 const authMiddleware = async (
   req: Request,
   res: Response,
@@ -156,9 +176,45 @@ const authMiddleware = async (
     return res.status(401).json(new ApiErrorHandler(401, "Unauthorized!"));
   }
 };
+const sharedContentMiddleware = async (
+  req: ExtendedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<any> => {
+  try {
+    const { sharedLink } = req.params;
+    const link = (await Link.findOne({ sharedLink })) as ISharedLink;
 
-// *** Routes -->
+    if (!link) {
+      return res.status(404).json(new ApiErrorHandler(404, "Link not found!"));
+    }
 
+    if (link.accessType === "single") {
+      const content = await Content.findById(link.content);
+      if (!content) {
+        return res
+          .status(404)
+          .json(new ApiErrorHandler(404, "Content not found!"));
+      }
+      req.sharedLink = link;
+      req.content = content;
+      next();
+    } else if (link.accessType === "all") {
+      req.sharedLink = link;
+      next();
+    } else {
+      return res
+        .status(400)
+        .json(new ApiErrorHandler(400, "Invalid access type!"));
+    }
+  } catch (error) {
+    return res
+      .status(400)
+      .json(new ApiErrorHandler(400, "Can't share content!"));
+  }
+};
+
+// *** Routes ------------->
 app.post(
   "/api/v1/signup",
   async (req: Request, res: Response): Promise<any> => {
@@ -307,7 +363,7 @@ app.post(
         tags: tagIds,
         owner: (req.user as IUser)._id,
       });
-      console.log(newContent)
+      console.log(newContent);
       if (!newContent) {
         return res
           .status(500)
@@ -328,9 +384,39 @@ app.post(
 ); // Dynamic tags creating feature is having
 
 app.get(
-  "/api/v1/get-content",
-  async (req: Request, res: Response): Promise<any> => {}
+  "/api/v1/get-all-contents",
+  authMiddleware,
+  async (req: Request, res: Response): Promise<any> => {
+    try {
+      if (!req.user) {
+        return res
+          .status(401)
+          .json(new ApiErrorHandler(401, "Unauthorized user!"));
+      }
+
+      const contents = await Content.find({ owner: req.user._id })
+        .populate("tags");
+
+      return res
+        .status(200)
+        .json(new ApiResponseHandler(200, "Fetched contents..", contents));
+    } catch (error) {
+      return res
+        .status(500)
+        .json(new ApiErrorHandler(500, "Internal server error at catch!"));
+    }
+  }
 );
+
+app.get(
+  "/api/v1/get-single-content/:id",
+  authMiddleware,
+  async (req: Request, res: Response): Promise<any> => {
+    try {
+    } catch (error) {}
+  }
+);
+
 app.delete(
   "/api/v1/delete-content",
   async (req: Request, res: Response): Promise<any> => {}
