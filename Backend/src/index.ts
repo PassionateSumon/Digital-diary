@@ -394,8 +394,9 @@ app.get(
           .json(new ApiErrorHandler(401, "Unauthorized user!"));
       }
 
-      const contents = await Content.find({ owner: req.user._id })
-        .populate("tags");
+      const contents = await Content.find({ owner: req.user._id }).populate(
+        "tags"
+      );
 
       return res
         .status(200)
@@ -406,26 +407,102 @@ app.get(
         .json(new ApiErrorHandler(500, "Internal server error at catch!"));
     }
   }
-);
+); // this is only for actual user
 
 app.get(
   "/api/v1/get-single-content/:id",
   authMiddleware,
   async (req: Request, res: Response): Promise<any> => {
     try {
-    } catch (error) {}
+      if (!req.user) {
+        return res
+          .status(401)
+          .json(new ApiErrorHandler(401, "Unauthorized user!"));
+      }
+      const content = await Content.findById(req.params.id).populate("tags");
+      if (!content) {
+        return res
+          .status(404)
+          .json(new ApiErrorHandler(404, "Content not found!"));
+      }
+      return res
+        .status(200)
+        .json(new ApiResponseHandler(200, "Fetched content.", content));
+    } catch (error) {
+      return res
+        .status(500)
+        .json(new ApiErrorHandler(500, "Internal server error at catch!"));
+    }
+  }
+); // actual user --> single content fetched
+
+app.put(
+  "/api/v1/update-content",
+  authMiddleware,
+  async (req: Request, res: Response): Promise<any> => {
+
   }
 );
 
 app.delete(
   "/api/v1/delete-content",
+  authMiddleware,
   async (req: Request, res: Response): Promise<any> => {}
 );
+
 app.post(
   "/api/v1/brain/share",
-  async (req: Request, res: Response): Promise<any> => {}
+  authMiddleware,
+  async (req: Request, res: Response): Promise<any> => {
+    try {
+      
+    } catch (error) {
+      
+    }
+  }
 );
+
 app.get(
-  "/api/v1/brain/:shareLink",
-  async (req: Request, res: Response): Promise<any> => {}
-);
+  "/api/v1/brain/get-content/:sharedLink",
+  sharedContentMiddleware,
+  async (req: ExtendedRequest, res: Response): Promise<any> => {
+    try {
+      const link = req.sharedLink as ISharedLink;
+      if (!link) {
+        return res
+          .status(404)
+          .json(new ApiErrorHandler(404, "Link is not correct!"));
+      }
+
+      if (link.accessType === "single") {
+        const content = req.content;
+        if (!content) {
+          return res
+            .status(404)
+            .json(new ApiErrorHandler(404, "Content not found!"));
+        }
+        return res
+          .status(200)
+          .json(
+            new ApiResponseHandler(200, "Fetched shared content.", content)
+          );
+      } else if (link.accessType === "all") {
+        const content = await Content.find({ owner: link.owner }).populate(
+          "tags"
+        );
+        if (!content || content.length === 0) {
+          return res
+            .status(404)
+            .json(new ApiErrorHandler(404, "Content not found!"));
+        }
+        return res
+          .status(200)
+          .json(new ApiResponseHandler(200, "Fetched.", content));
+      }
+    } catch (error) {
+      return res
+        .status(500)
+        .json(new ApiErrorHandler(500, "Internal server error at catch!"));
+    }
+  }
+); // shared content
