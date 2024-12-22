@@ -441,9 +441,77 @@ app.get(
 ); // actual user --> single content fetched
 
 app.put(
-  "/api/v1/update-content",
+  "/api/v1/update-content/:id",
   authMiddleware,
-  async (req: Request, res: Response): Promise<any> => {}
+  async (req: Request, res: Response): Promise<any> => {
+    try {
+      if (!req.user) {
+        return res
+          .status(401)
+          .json(new ApiErrorHandler(401, "Unauthorized user!"));
+      }
+
+      const contentId = req.params.id;
+      const { title, description, links, tags } = req.body;
+
+      const content = await Content.findById(contentId);
+      if (!content) {
+        return res
+          .status(404)
+          .json(new ApiErrorHandler(404, "Content not found!"));
+      }
+
+      if (title) content.title = title;
+      if (description) content.description = description;
+      if (links) content.links = links;
+
+      let tagIds: mongoose.Types.ObjectId[] = [];
+      if (tags && tags.length > 0) {
+        tagIds = await Promise.all(
+          tags?.map(async (t: any) => {
+            let tag = await Tag.findOne({ name: t });
+            if (!tag) {
+              tag = await Tag.create({
+                name: t,
+                owner: (req.user as IUser)._id,
+              });
+            }
+            return tag._id;
+          })
+        );
+      }
+      if (tagIds.length > 0) {
+        tagIds.map((t) => content.tags.push(t));
+      }
+
+      const updatedContent = await content.save();
+      if (!updatedContent) {
+        return res
+          .status(500)
+          .json(
+            new ApiErrorHandler(500, "something went wrong while updating!")
+          );
+      }
+      const finalContent = await updatedContent.populate("tags");
+      if (!finalContent) {
+        return res
+          .status(500)
+          .json(
+            new ApiErrorHandler(
+              500,
+              "something went wrong to get final updated content!"
+            )
+          );
+      }
+      return res
+        .status(200)
+        .json(new ApiResponseHandler(200, "content updated..", finalContent));
+    } catch (error) {
+      return res
+        .status(500)
+        .json(new ApiErrorHandler(500, "Internal server error at catch!"));
+    }
+  }
 );
 
 app.delete(
