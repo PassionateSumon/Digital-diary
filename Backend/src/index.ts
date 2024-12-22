@@ -75,6 +75,10 @@ class ApiErrorHandler {
     };
   }
 }
+const generateSharingLink = () => {
+  const link = `${Date.now()}-${Math.floor(Math.random() * 1000000)}`;
+  return link;
+};
 
 // *** DB connnection ------>
 const connectDB = async () => {
@@ -260,7 +264,7 @@ app.post(
         .json(new ApiErrorHandler(500, "something went wrong at catch!"));
     }
   }
-);
+); // signup user
 
 app.post(
   "/api/v1/signin",
@@ -309,7 +313,7 @@ app.post(
         .json(new ApiErrorHandler(500, "something went wrong at catch!!"));
     }
   }
-);
+); // signin user
 
 app.post(
   "/api/v1/create-content",
@@ -439,15 +443,78 @@ app.get(
 app.put(
   "/api/v1/update-content",
   authMiddleware,
-  async (req: Request, res: Response): Promise<any> => {
-
-  }
+  async (req: Request, res: Response): Promise<any> => {}
 );
 
 app.delete(
   "/api/v1/delete-content",
   authMiddleware,
-  async (req: Request, res: Response): Promise<any> => {}
+  async (req: Request, res: Response): Promise<any> => {
+    try {
+      if (!req.user) {
+        return res
+          .status(401)
+          .json(new ApiErrorHandler(401, "Unauthorized user!"));
+      }
+
+      const { contentId, type } = req.body;
+
+      if (type === "single") {
+        if (!contentId) {
+          return res
+            .status(400)
+            .json(new ApiErrorHandler(400, "Content-id is required!"));
+        }
+
+        const content = await Content.findById(contentId);
+        if (!content) {
+          return res
+            .status(404)
+            .json(new ApiErrorHandler(404, "Content not found!"));
+        }
+        const deletedContent = await Content.deleteOne({
+          _id: new mongoose.Types.ObjectId(contentId),
+        });
+        if (deletedContent.deletedCount === 0) {
+          return res
+            .status(400)
+            .json(new ApiErrorHandler(400, "Can't delete!"));
+        }
+
+        return res
+          .status(200)
+          .json(
+            new ApiResponseHandler(200, "Content deleted!", deletedContent)
+          );
+      } else if (type === "all") {
+        const deletedContent = await Content.deleteMany({
+          owner: (req.user as IUser)._id,
+        });
+        if (deletedContent.deletedCount === 0) {
+          return res
+            .status(400)
+            .json(new ApiErrorHandler(400, "Can't delete!"));
+        }
+
+        return res
+          .status(200)
+          .json(
+            new ApiResponseHandler(200, "Content deleted!", deletedContent)
+          );
+      } else {
+        return res.status(400).json(new ApiErrorHandler(400, "Bad request!"));
+      }
+    } catch (error) {
+      return res
+        .status(500)
+        .json(
+          new ApiErrorHandler(
+            500,
+            "Internal server error at catch for deleting!"
+          )
+        );
+    }
+  }
 );
 
 app.post(
@@ -455,15 +522,87 @@ app.post(
   authMiddleware,
   async (req: Request, res: Response): Promise<any> => {
     try {
-      
+      const { contentId, accessType } = req.body;
+      if (!["all", "single"].includes(accessType)) {
+        return res.status(400).json(new ApiErrorHandler(400, "Bad request!"));
+      }
+
+      if (accessType === "single") {
+        if (!contentId) {
+          return res
+            .status(404)
+            .json(new ApiErrorHandler(404, "Content-id is required!"));
+        }
+
+        const content = await Content.findOne({
+          _id: contentId,
+          owner: (req.user as IUser)._id,
+        });
+        if (!content) {
+          return res
+            .status(404)
+            .json(new ApiErrorHandler(404, "Content not found!!"));
+        }
+
+        const sharedLink = generateSharingLink();
+        const link = await Link.create({
+          owner: (req.user as IUser)._id,
+          isActive: true,
+          accessType: "single",
+          content: contentId,
+          sharedLink,
+        });
+        if (!link) {
+          return res
+            .status(404)
+            .json(
+              new ApiErrorHandler(404, "Link is not created for some reason!")
+            );
+        }
+
+        return res.status(200).json(
+          new ApiResponseHandler(200, "Link created successfully..", {
+            sharedLink,
+          })
+        );
+      } else if (accessType === "all") {
+        const sharedLink = generateSharingLink();
+        const link = await Link.create({
+          owner: (req.user as IUser)._id,
+          isActive: true,
+          accessType: "all",
+          sharedLink,
+        });
+        if (!link) {
+          return res
+            .status(404)
+            .json(
+              new ApiErrorHandler(404, "Link is not created for some reason!")
+            );
+        }
+
+        return res.status(200).json(
+          new ApiResponseHandler(200, "Link created successfully..", {
+            sharedLink,
+          })
+        );
+      }
     } catch (error) {
-      
+      return res
+        .status(500)
+        .json(
+          new ApiErrorHandler(
+            500,
+            "Internal server error at catch while creating link!"
+          )
+        );
     }
   }
-);
+); // link creation for sharing both all and specific content
 
 app.get(
   "/api/v1/brain/get-content/:sharedLink",
+  authMiddleware,
   sharedContentMiddleware,
   async (req: ExtendedRequest, res: Response): Promise<any> => {
     try {
