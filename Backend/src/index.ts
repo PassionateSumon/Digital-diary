@@ -8,8 +8,16 @@ import dotenv from "dotenv";
 import mongoose, { Document } from "mongoose";
 import { z } from "zod";
 import bcrypt from "bcrypt";
-import { model, Schema } from "mongoose";
 import jwt from "jsonwebtoken";
+import ApiErrorHandler from "./apiErrorHandler";
+import ApiResponseHandler from "./apiResponseHandler";
+import { connectDB } from "./db/db";
+import User from "./model/user.model";
+import Tag from "./model/tag.model";
+import Content from "./model/content.model";
+import Link from "./model/link.model";
+import authMiddleware from "./middleware/auth.middleware";
+import sharedContentMiddleware from "./middleware/sharedContent.middleware";
 dotenv.config();
 
 // *** Permissions -->
@@ -26,7 +34,7 @@ app.use(cookieParser());
 const server = http.createServer(app);
 
 // *** Interfaces -->
-interface JWTPayload {
+export interface JWTPayload {
   id: string;
 }
 export interface IUser extends Document {
@@ -34,7 +42,7 @@ export interface IUser extends Document {
   password: string;
   token?: string;
 }
-interface ISharedLink extends Document {
+export interface ISharedLink extends Document {
   owner: string;
   accessType: "all" | "single";
   content?: string;
@@ -46,101 +54,18 @@ export interface ExtendedRequest extends Request {
 }
 
 // *** Utils --------->
-class ApiResponseHandler {
-  public code: number;
-  public message: string;
-  public data?: unknown;
-  public role?: string;
-
-  constructor(code: number, message: string, data?: unknown, role?: string) {
-    this.code = code;
-    this.message = message;
-    this.data = data;
-    this.role = role;
-  }
-}
-class ApiErrorHandler {
-  public code: number;
-  public message: string | unknown;
-
-  constructor(code: number, message: string | unknown) {
-    this.code = code;
-    this.message = message;
-  }
-
-  toJSON() {
-    return {
-      code: this.code,
-      message: this.message,
-    };
-  }
-}
 const generateSharingLink = () => {
   const link = `${Date.now()}-${Math.floor(Math.random() * 1000000)}`;
   return link;
 };
 
 // *** DB connnection ------>
-const connectDB = async () => {
-  try {
-    const db = await mongoose.connect(process.env.MONGO_URI as string);
-    console.log(`Connection: ${db.connection.host}`);
-  } catch (error) {
-    console.error("Error connecting to db: ", error);
-    process.exit(1);
-  }
-};
 connectDB().then(() => {
   server.listen(process.env.PORT || 8080, () => {
     console.log(`port running: http://localhost:${process.env.PORT}`);
   });
 });
 
-// *** Models and Schemas -------->
-const userSchema = new Schema<IUser>(
-  {
-    email: { type: String, required: true, unique: true },
-    password: String,
-    token: String,
-  },
-  { timestamps: true }
-);
-const User = model<IUser>("User", userSchema);
-// *** ----------------------------------------
-const tagSchema = new Schema(
-  {
-    name: { type: String, unique: true },
-    owner: { type: mongoose.Types.ObjectId, ref: "User", required: true },
-  },
-  { timestamps: true }
-);
-const Tag = model("Tag", tagSchema);
-// *** -------------------------------------
-const contentSchema = new Schema(
-  {
-    title: { type: String, required: true },
-    description: { type: String, required: false },
-    links: { type: [String], default: [] },
-    tags: [{ type: mongoose.Types.ObjectId, ref: "Tag" }],
-    owner: { type: mongoose.Types.ObjectId, ref: "User", required: true },
-  },
-  { timestamps: true }
-);
-const Content = model("Content", contentSchema);
-// *** -----------------------------------------
-const linkSchema = new Schema(
-  {
-    owner: { type: mongoose.Types.ObjectId, ref: "User", required: true },
-    isActive: { type: Boolean, default: false },
-    accessType: { type: String, enum: ["single", "all"], default: "all" },
-    content: { type: mongoose.Types.ObjectId, ref: "Content" },
-    sharedLink: { type: String, unique: true, required: true },
-  },
-  { timestamps: true }
-);
-const Link = model("Link", linkSchema);
-
-// *** -----------------------------------------
 // *** Zod validation ---------->
 const Auth = z.object({
   email: z.string().email(),
@@ -152,71 +77,6 @@ const ContentValid = z.object({
   links: z.array(z.string().url()).optional(),
   tags: z.array(z.string()).optional(),
 });
-
-// *** Middlewares ------------>
-const authMiddleware = async (
-  req: Request,
-  res: Response,
-  next: NextFunction
-): Promise<any> => {
-  try {
-    const token = req.headers.authorization as string;
-    if (!token) {
-      return res
-        .status(401)
-        .json(new ApiErrorHandler(401, "token should be present!"));
-    }
-    const decoded = jwt.verify(
-      token,
-      process.env.JWT_SECRET as string
-    ) as JWTPayload;
-    const user = await User.findById(decoded.id);
-    if (!user) {
-      return res.status(401).json(new ApiErrorHandler(401, "Unauthorized!"));
-    }
-    req.user = user;
-    next();
-  } catch (error) {
-    return res.status(401).json(new ApiErrorHandler(401, "Unauthorized!"));
-  }
-};
-const sharedContentMiddleware = async (
-  req: ExtendedRequest,
-  res: Response,
-  next: NextFunction
-): Promise<any> => {
-  try {
-    const { sharedLink } = req.params;
-    const link = (await Link.findOne({ sharedLink })) as ISharedLink;
-
-    if (!link) {
-      return res.status(404).json(new ApiErrorHandler(404, "Link not found!"));
-    }
-
-    if (link.accessType === "single") {
-      const content = await Content.findById(link.content);
-      if (!content) {
-        return res
-          .status(404)
-          .json(new ApiErrorHandler(404, "Content not found!"));
-      }
-      req.sharedLink = link;
-      req.content = content;
-      next();
-    } else if (link.accessType === "all") {
-      req.sharedLink = link;
-      next();
-    } else {
-      return res
-        .status(400)
-        .json(new ApiErrorHandler(400, "Invalid access type!"));
-    }
-  } catch (error) {
-    return res
-      .status(400)
-      .json(new ApiErrorHandler(400, "Can't share content!"));
-  }
-};
 
 // *** Routes ------------->
 app.post(
@@ -713,3 +573,5 @@ app.get(
     }
   }
 ); // shared content
+
+export default app;
