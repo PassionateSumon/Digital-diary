@@ -1,4 +1,4 @@
-import express, { Request, Response, NextFunction } from "express";
+import express, { Request, Response } from "express";
 import http from "http";
 import bodyParser from "body-parser";
 import cookieParser from "cookie-parser";
@@ -271,7 +271,7 @@ app.get(
         .json(new ApiErrorHandler(500, "Internal server error at catch!"));
     }
   }
-); // this is only for actual user
+); // this is only for actual user to fetch all contents
 
 app.get(
   "/api/v1/get-single-content/:id",
@@ -372,7 +372,7 @@ app.put(
         .json(new ApiErrorHandler(500, "Internal server error at catch!"));
     }
   }
-);
+); // content update not profile
 
 app.delete(
   "/api/v1/delete-content",
@@ -443,7 +443,7 @@ app.delete(
         );
     }
   }
-);
+); // only content delete, not the profile delete 
 
 app.post(
   "/api/v1/brain/share",
@@ -573,5 +573,79 @@ app.get(
     }
   }
 ); // shared content
+
+app.delete(
+  "api/v1/brain/stop-share",
+  authMiddleware,
+  async (req: Request, res: Response): Promise<any> => {
+    if (!req.user) {
+      return res
+        .status(401)
+        .json(new ApiErrorHandler(401, "Unauthorized user!"));
+    }
+    try {
+      const { sharedLinkId, type } = req.body;
+
+      if (type === "single") {
+        if (!sharedLinkId) {
+          return res
+            .status(400)
+            .json(new ApiErrorHandler(400, "You must give the shared id!"));
+        }
+        const link = await Link.findById(sharedLinkId);
+        if (!link) {
+          return res
+            .status(404)
+            .json(new ApiErrorHandler(404, "Link not found!"));
+        }
+
+        if (link.owner !== req.user._id) {
+          return res
+            .status(401)
+            .json(new ApiErrorHandler(401, "Unauthorized user!"));
+        }
+
+        const deletedLink = await Link.deleteOne({ _id: sharedLinkId });
+        if (deletedLink.deletedCount === 0) {
+          return res
+            .status(400)
+            .json(
+              new ApiErrorHandler(
+                400,
+                "Can't disable shared link for this single content!"
+              )
+            );
+        }
+
+        return res
+          .status(200)
+          .json(
+            new ApiResponseHandler(
+              200,
+              "Link disabled for this single content!"
+            )
+          );
+      } else if (type === "all") {
+        const stoppedLinks = await Link.deleteMany({
+          owner: (req.user as IUser)._id,
+        });
+        if (stoppedLinks.deletedCount === 0) {
+          return res
+            .status(400)
+            .json(new ApiErrorHandler(400, "Can't delete link!"));
+        }
+        return res
+          .status(200)
+          .json(new ApiResponseHandler(200, "Link disabled!"));
+      } else {
+        return res.status(400).json(new ApiErrorHandler(400, "Bad request!"));
+      }
+    } catch (error) {
+      return res
+        .status(500)
+        .json(new ApiErrorHandler(500, "Internal server error at catch!"));
+    }
+  }
+); // stop sharing by deleteing the link from the Link schema 
 
 export default app;

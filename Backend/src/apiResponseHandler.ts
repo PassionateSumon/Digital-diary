@@ -10,7 +10,15 @@ class ApiResponseHandler {
     this.data = data;
     this.role = role;
   }
+
+  toJSON() {
+    return {
+      code: this.code,
+      message: this.message,
+      data: this.data,
+      role: this.role,
+    };
+  }
 }
-  
-  export default ApiResponseHandler;
-  
+
+export default ApiResponseHandler;
