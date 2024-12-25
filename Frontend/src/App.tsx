@@ -6,9 +6,20 @@ import {
   Navigate,
 } from "react-router-dom";
 import Navigation from "./components/Navigation";
-import { FC } from "react";
+import { FC, useEffect } from "react";
 import NotFound from "./components/NotFound";
+import { useSelector } from "react-redux";
 const App: FC = () => {
+  const theme = useSelector((state: any) => state.theme.mode);
+
+  useEffect(() => {
+    if (theme === "dark") {
+      document.documentElement.classList.add("dark");
+    } else {
+      document.documentElement.classList.remove("dark");
+    }
+  }, [theme]);
+
   return (
     <Router>
       <Navigation />
